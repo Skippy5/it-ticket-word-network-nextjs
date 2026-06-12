@@ -3,9 +3,17 @@
 /**
  * Force-directed canvas renderer (react-force-graph-2d).
  * Loaded only in the browser via next/dynamic (see GraphPanel).
+ *
+ * Readability choices (mirroring the vis-network reference build):
+ * - labels are always drawn with a background-colored halo stroke so they
+ *   stay legible over edges, sized with the node;
+ * - a collision force keeps nodes (and their labels) from overlapping and a
+ *   stronger charge spreads the clusters;
+ * - an on-canvas toolbar exposes Physics ON/OFF, Fit and Clear selection.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ForceGraph2D, { type ForceGraphMethods } from "react-force-graph-2d";
+import { forceCollide } from "d3-force";
 import { mulberry32 } from "@/lib/clustering";
 import { communityColor } from "@/lib/defaults";
 import { useDataStore, useSettingsStore } from "@/lib/store";
@@ -42,6 +50,7 @@ export function GraphView() {
   const selection = useDataStore((s) => s.selection);
   const setSelection = useDataStore((s) => s.setSelection);
   const physics = useSettingsStore((s) => s.physics);
+  const setPhysics = useSettingsStore((s) => s.setPhysics);
   const theme = useThemeStore((s) => s.theme);
   const dark = theme === "dark";
 
@@ -72,9 +81,9 @@ export function GraphView() {
     const nodes: VizNode[] = graph.nodes.map((n) => {
       const rng = mulberry32(stringHash(n.id));
       const angle = n.community * 2.39996; // golden angle per community
-      const cx = Math.cos(angle) * 160;
-      const cy = Math.sin(angle) * 160;
-      return { ...n, x: cx + (rng() - 0.5) * 120, y: cy + (rng() - 0.5) * 120 };
+      const cx = Math.cos(angle) * 240;
+      const cy = Math.sin(angle) * 240;
+      return { ...n, x: cx + (rng() - 0.5) * 160, y: cy + (rng() - 0.5) * 160 };
     });
     const links: VizLink[] = graph.edges.map((e) => ({ ...e }));
     return { nodes, links };
@@ -112,6 +121,31 @@ export function GraphView() {
     return { neighbors, maxWeight: Math.max(maxWeight, 1e-9), maxFreq, topNeighbors };
   }, [graph]);
 
+  const nodeRadius = useCallback(
+    (n: VizNode) => 4 + 11 * Math.sqrt(n.freq / maxFreq),
+    [maxFreq]
+  );
+
+  /**
+   * Spread the layout: stronger repulsion, longer links, and a collision
+   * force so nodes + labels never pile up (the vis-network "avoidOverlap"
+   * equivalent — the single biggest readability win).
+   */
+  useEffect(() => {
+    const fg = graphRef.current;
+    if (!fg) return;
+    fg.d3Force("charge")?.strength(-160);
+    const link = fg.d3Force("link");
+    if (link) link.distance(55);
+    fg.d3Force(
+      "collide",
+      forceCollide<VizNode>()
+        .radius((n) => nodeRadius(n) + 16)
+        .strength(0.9)
+    );
+    fg.d3ReheatSimulation();
+  }, [data, nodeRadius]);
+
   // re-heat the simulation when physics is switched back on
   useEffect(() => {
     if (physics) graphRef.current?.d3ReheatSimulation();
@@ -139,11 +173,8 @@ export function GraphView() {
     return "full";
   }
 
-  function nodeRadius(n: VizNode): number {
-    return 3 + 9 * Math.sqrt(n.freq / maxFreq);
-  }
-
   const labelColor = dark ? "#e4e4e7" : "#27272a";
+  const haloColor = dark ? "#09090b" : "#fafafa"; // canvas background per theme
   const fadedAlpha = 0.12;
 
   return (
@@ -155,11 +186,11 @@ export function GraphView() {
         graphData={data}
         backgroundColor="rgba(0,0,0,0)"
         autoPauseRedraw={false}
-        cooldownTicks={physics ? Infinity : 0}
+        cooldownTicks={physics ? 300 : 0}
         onEngineStop={() => {
           if (!didFitRef.current) {
             didFitRef.current = true;
-            graphRef.current?.zoomToFit(400, 60);
+            graphRef.current?.zoomToFit(400, 40);
           }
         }}
         nodeLabel={(n) => {
@@ -173,7 +204,8 @@ export function GraphView() {
         nodeCanvasObject={(n, ctx, globalScale) => {
           const r = nodeRadius(n);
           const vis = nodeVisibility(n.id);
-          ctx.globalAlpha = vis === "faded" ? fadedAlpha : 1;
+          const faded = vis === "faded";
+          ctx.globalAlpha = faded ? fadedAlpha : 1;
           ctx.beginPath();
           ctx.arc(n.x!, n.y!, r, 0, 2 * Math.PI);
           ctx.fillStyle = communityColor(n.community);
@@ -183,20 +215,29 @@ export function GraphView() {
             ctx.strokeStyle = dark ? "#fafafa" : "#18181b";
             ctx.stroke();
           }
-          const showLabel = globalScale > 1.1 || r * globalScale > 9;
-          if (showLabel && vis === "full") {
-            const fontSize = Math.max(11 / globalScale, 1.6);
-            ctx.font = `${fontSize}px ui-sans-serif, system-ui, sans-serif`;
+
+          // Always-on label with halo, sized with the node, with a screen-px
+          // floor that grows with node importance so cluster anchors stay
+          // readable even fully zoomed out. Tiny labels (<4.5px) are skipped.
+          const importance = Math.sqrt(n.freq / maxFreq);
+          const floorPx = 5 + 8 * importance;
+          const fontSize = Math.max(Math.max(5, 3 + r * 0.6), floorPx / globalScale);
+          if (!faded && fontSize * globalScale >= 4.5) {
+            ctx.font = `600 ${fontSize}px ui-sans-serif, system-ui, sans-serif`;
             ctx.textAlign = "center";
             ctx.textBaseline = "top";
+            ctx.lineWidth = Math.max(fontSize / 4, 1.5);
+            ctx.lineJoin = "round";
+            ctx.strokeStyle = haloColor;
+            ctx.strokeText(n.label, n.x!, n.y! + r + 1.5);
             ctx.fillStyle = labelColor;
-            ctx.fillText(n.label, n.x!, n.y! + r + 1.5 / globalScale);
+            ctx.fillText(n.label, n.x!, n.y! + r + 1.5);
           }
           ctx.globalAlpha = 1;
         }}
         nodePointerAreaPaint={(n, color, ctx) => {
           ctx.beginPath();
-          ctx.arc(n.x!, n.y!, nodeRadius(n) + 3, 0, 2 * Math.PI);
+          ctx.arc(n.x!, n.y!, nodeRadius(n) + 4, 0, 2 * Math.PI);
           ctx.fillStyle = color;
           ctx.fill();
         }}
@@ -209,12 +250,12 @@ export function GraphView() {
             return dark ? "rgba(212,212,216,0.65)" : "rgba(63,63,70,0.6)";
           }
           if (selectedNode || selectedEdge || hoverRef.current) {
-            return dark ? "rgba(161,161,170,0.06)" : "rgba(113,113,122,0.06)";
+            return dark ? "rgba(161,161,170,0.05)" : "rgba(113,113,122,0.05)";
           }
-          return dark ? "rgba(161,161,170,0.22)" : "rgba(113,113,122,0.25)";
+          return dark ? "rgba(161,161,170,0.16)" : "rgba(113,113,122,0.18)";
         }}
         linkWidth={(l) => {
-          const base = 0.5 + 4 * (l.weight / maxWeight);
+          const base = 0.5 + 3.5 * (l.weight / maxWeight);
           return l.id === selectedEdge ? base + 1.5 : base;
         }}
         linkHoverPrecision={6}
@@ -229,6 +270,29 @@ export function GraphView() {
         }}
         onBackgroundClick={() => setSelection(null)}
       />
+
+      {/* on-canvas toolbar */}
+      <div className="absolute right-3 top-3 flex gap-1.5">
+        <button
+          onClick={() => setPhysics(!physics)}
+          className="rounded border border-zinc-300 bg-white/90 px-2.5 py-1 text-xs font-medium shadow-sm backdrop-blur hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900/90 dark:hover:bg-zinc-800"
+        >
+          Physics: {physics ? "ON" : "OFF"}
+        </button>
+        <button
+          onClick={() => graphRef.current?.zoomToFit(400, 40)}
+          className="rounded border border-zinc-300 bg-white/90 px-2.5 py-1 text-xs font-medium shadow-sm backdrop-blur hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900/90 dark:hover:bg-zinc-800"
+        >
+          Fit
+        </button>
+        <button
+          onClick={() => setSelection(null)}
+          disabled={!selection}
+          className="rounded border border-zinc-300 bg-white/90 px-2.5 py-1 text-xs font-medium shadow-sm backdrop-blur hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-900/90 dark:hover:bg-zinc-800"
+        >
+          Clear selection
+        </button>
+      </div>
 
       {/* cluster legend */}
       <div className="pointer-events-none absolute bottom-3 left-3 max-h-48 max-w-72 overflow-hidden rounded border border-zinc-200 bg-white/85 p-2 text-[11px] backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/85">

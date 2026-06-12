@@ -37,6 +37,9 @@ is no backend, no database, and no API routes.
   configurable URL template. Hover for term/frequency/cluster/top-neighbors.
 - **Exports**: node list, edge list (including co-occurring incident IDs per
   edge), filtered incident list (CSV), full graph (JSON).
+- **Readable canvas**: always-on node labels with halo strokes, a collision
+  force that keeps nodes/labels from overlapping, and an on-canvas toolbar
+  (Physics ON/OFF · Fit · Clear selection).
 - **Light & dark mode** with OS-preference default and a header toggle.
 - Settings (stop-words, synonyms, phrases, URL template, tuning) persist to
   `localStorage` — the only persistence in the app.
