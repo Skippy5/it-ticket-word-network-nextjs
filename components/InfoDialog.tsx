@@ -89,7 +89,8 @@ export function InfoDialog({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
-        <div className="flex justify-end border-t border-zinc-200 px-4 py-2.5 dark:border-zinc-800">
+        <div className="flex items-center justify-between border-t border-zinc-200 px-4 py-2.5 dark:border-zinc-800">
+          <span className="text-xs text-zinc-500 dark:text-zinc-400">Built with Fable 5</span>
           <button
             onClick={onClose}
             className="rounded bg-blue-600 px-4 py-1 text-xs font-medium text-white hover:bg-blue-700"
