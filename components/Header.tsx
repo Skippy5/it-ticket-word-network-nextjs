@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { parseCsvFile, parseCsvText } from "@/lib/csv";
 import { useDataStore } from "@/lib/store";
+import { InfoDialog } from "./InfoDialog";
 import { ThemeToggle } from "./ThemeToggle";
 
 const DEMO_FILES = [
@@ -22,6 +23,7 @@ export function Header({ filteredCount }: { filteredCount: number }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [demoOpen, setDemoOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
 
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -127,8 +129,19 @@ export function Header({ filteredCount }: { filteredCount: number }) {
           )}
         </div>
 
+        <button
+          onClick={() => setInfoOpen(true)}
+          title="About this tool — how it works"
+          aria-label="About this tool"
+          className="flex h-7 w-7 items-center justify-center rounded-full border border-zinc-300 bg-zinc-50 text-xs font-semibold hover:bg-zinc-200 dark:border-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700"
+        >
+          ⓘ
+        </button>
+
         <ThemeToggle />
       </div>
+
+      {infoOpen && <InfoDialog onClose={() => setInfoOpen(false)} />}
     </header>
   );
 }
